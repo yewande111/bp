@@ -18,6 +18,15 @@ namespace BPCalculator
 
         public static IHostBuilder CreateHostBuilder(string[] args) =>
             Host.CreateDefaultBuilder(args)
+                .ConfigureLogging(logging =>
+                {
+                    // Add console logging for local development
+                    logging.AddConsole();
+                    
+                    // Add AWS CloudWatch logging
+                    // This will automatically work when deployed to Elastic Beanstalk
+                    logging.AddAWSProvider();
+                })
                 .ConfigureWebHostDefaults(webBuilder =>
                 {
                     webBuilder.UseStartup<Startup>();
