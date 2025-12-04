@@ -226,3 +226,74 @@ terraform plan -var-file="env/production.tfvars"
 
 ---
 *End of Phase 0.4*
+
+## Phase 0.5: Create Deployment Automation Scripts ✅
+
+**Date:** December 4, 2025  
+**Status:** COMPLETE
+
+### Actions Completed:
+1. ✅ Created `deploy.sh` - Automated deployment script
+2. ✅ Created `destroy.sh` - Automated destruction script  
+3. ✅ Made scripts executable (`chmod +x`)
+4. ✅ Created comprehensive documentation (`SCRIPTS_README.md`)
+
+### deploy.sh Features:
+- Prerequisites checking (Terraform, AWS CLI, credentials)
+- Terraform initialization with correct backend configuration
+- Configuration validation
+- Interactive deployment approval
+- Support for staging, production, or both environments
+- Colored output for better readability
+- Automatic cleanup of plan files
+
+**Usage:**
+```bash
+./deploy.sh [staging|production|all]
+```
+
+### destroy.sh Features:
+- Multiple safety confirmation prompts
+- Terraform state backup before destruction
+- Environment-specific destruction
+- Artifact bucket cleanup
+- Optional Terraform backend cleanup
+- Auto-approve mode for automation
+- Lists all resources to be destroyed
+
+**Usage:**
+```bash
+./destroy.sh [staging|production|all] [--auto-approve]
+```
+
+### Safety Features:
+- ✅ **Deploy:** Requires "yes" confirmation
+- ✅ **Destroy:** Requires typing exact confirmation text (e.g., "DELETE-staging")
+- ✅ **State Backup:** Automatic backup before destruction
+- ✅ **Backend Protection:** Separate confirmation for backend deletion
+- ✅ **Prerequisites Check:** Validates all requirements before execution
+
+### Documentation Created:
+- `SCRIPTS_README.md` - Comprehensive scripts usage guide with examples and troubleshooting
+
+### Typical Workflows:
+
+**First-Time Deployment:**
+```bash
+./deploy.sh staging    # Deploy and test staging
+./deploy.sh production # Deploy production
+```
+
+**Daily Development:**
+```bash
+./deploy.sh staging    # Morning: deploy for testing
+./destroy.sh staging   # Evening: destroy to save costs
+```
+
+**Post-Submission Cleanup:**
+```bash
+./destroy.sh all       # Destroys everything with confirmations
+```
+
+---
+*End of Phase 0.5*
