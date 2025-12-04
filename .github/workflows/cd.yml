@@ -72,7 +72,6 @@ jobs:
           dotnet publish ${{ env.PROJECT_PATH }} \
             -c Release \
             -o ./publish \
-            --no-build \
             --self-contained true \
             -r linux-x64
       
