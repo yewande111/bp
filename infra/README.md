@@ -7,10 +7,10 @@ This directory contains Terraform configuration for deploying the Blood Pressure
 ```
 infra/
 ├── backend.tf                    # S3 backend configuration
-├── providers.tf                  # AWS provider configuration
-├── variables.tf                  # Variable definitions
-├── main.tf                       # Main infrastructure resources
-├── outputs.tf                    # Output values
+├── providers.tf                  # AWS provider configuration (NEW)
+├── variables.tf                  # Variable definitions (NEW)
+├── main.tf                       # Main infrastructure resources (NEW)
+├── outputs.tf                    # Output values (NEW)
 ├── env/
 │   ├── staging.backend.tfvars    # Staging backend config
 │   ├── staging.tfvars            # Staging environment variables
@@ -18,6 +18,40 @@ infra/
 │   └── production.tfvars         # Production environment variables
 └── README.md                     # This file
 ```
+
+## Infrastructure Components (Phase 3 Complete)
+
+### Networking
+- **VPC** with DNS support and hostnames enabled
+- **Internet Gateway** for public internet access
+- **2 Public Subnets** across different availability zones
+- **Route Tables** with internet gateway routes
+- **Security Group** for Elastic Beanstalk instances (HTTP/HTTPS)
+
+### Compute
+- **Elastic Beanstalk Application** for .NET 8 apps
+- **Elastic Beanstalk Environment** with auto-scaling
+- **Application Load Balancer** for traffic distribution
+- **Auto Scaling Group** (1-2 instances for staging, configurable)
+
+### IAM & Security
+- **Service Role** for Elastic Beanstalk operations
+- **Instance Role** with EC2, CloudWatch, and S3 permissions
+- **Instance Profile** for EC2 instances
+- **CloudWatch Logs Policy** for application logging
+
+### Storage
+- **S3 Bucket** for application version storage
+- Versioning enabled
+- Public access blocked
+
+### Monitoring
+- **CloudWatch Alarms** (optional, enabled by default):
+  - Unhealthy hosts detection
+  - 5xx error rate monitoring
+  - High CPU utilization alerts
+- **Enhanced Health Reporting** enabled
+- **Log Streaming** to CloudWatch (7-day retention)
 
 ## Separate State Files Strategy
 
