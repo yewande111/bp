@@ -23,38 +23,35 @@ jobs:
       
       - name: Restore dependencies
         run: dotnet restore
-        working-directory: ./bp-app
       
       - name: Build solution
         run: dotnet build --configuration Release --no-restore
-        working-directory: ./bp-app
       
       - name: Run unit tests
         run: dotnet test --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" --results-directory ./TestResults
-        working-directory: ./bp-app
       
       - name: Generate coverage report
         run: |
           dotnet tool install --global dotnet-reportgenerator-globaltool
-          reportgenerator -reports:./bp-app/TestResults/**/coverage.cobertura.xml -targetdir:./bp-app/CoverageReport -reporttypes:Html
+          reportgenerator -reports:./TestResults/**/coverage.cobertura.xml -targetdir:./CoverageReport -reporttypes:Html
       
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: ./bp-app/TestResults
+          path: ./TestResults
       
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: ./bp-app/CoverageReport
+          path: ./CoverageReport
       
       - name: Check test results
         run: |
-          if [ -f "./bp-app/TestResults/TestResults.xml" ]; then
+          if [ -f "./TestResults/TestResults.xml" ]; then
             echo "✅ Tests completed"
           else
             echo "✅ Tests completed successfully"
@@ -76,11 +73,9 @@ jobs:
       
       - name: Restore dependencies
         run: dotnet restore
-        working-directory: ./bp-app
       
       - name: Run security vulnerability scan
         run: dotnet list package --vulnerable --include-transitive
-        working-directory: ./bp-app
         continue-on-error: true
       
       - name: Install OWASP Dependency Check
@@ -91,7 +86,7 @@ jobs:
       - name: Run OWASP Dependency Check
         run: |
           ./dependency-check/bin/dependency-check.sh \
-            --scan ./bp-app \
+            --scan . \
             --format HTML \
             --format JSON \
             --out ./dependency-check-report \
@@ -131,7 +126,6 @@ jobs:
       
       - name: Check code formatting
         run: dotnet format --verify-no-changes --verbosity diagnostic
-        working-directory: ./bp-app
         continue-on-error: true
       
       - name: Code quality summary
