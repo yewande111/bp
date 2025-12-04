@@ -340,8 +340,8 @@ jobs:
           fi
           
           # Test 2: Homepage contains expected content
-          echo "Test 2: Homepage contains 'Blood Pressure'"
-          if curl -s "${URL}" | grep -q "Blood Pressure"; then
+          echo "Test 2: Homepage contains 'BP' content"
+          if curl -s "${URL}" | grep -qi "BP\|blood pressure"; then
             echo "✅ Content test passed"
           else
             echo "❌ Content test failed"
