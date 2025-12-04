@@ -236,12 +236,45 @@ jobs:
           ENV_NAME="${{ needs.deploy-infrastructure-staging.outputs.environment-name }}"
           
           echo "⏳ Waiting for staging environment to be ready..."
-          aws elasticbeanstalk wait environment-updated \
-            --application-name "${APP_NAME}" \
-            --environment-name "${ENV_NAME}" \
-            --region ${{ env.AWS_REGION }}
           
-          echo "✅ Staging deployment completed"
+          # Custom wait with better timeout handling
+          max_attempts=50
+          attempt=0
+          while [ $attempt -lt $max_attempts ]; do
+            status=$(aws elasticbeanstalk describe-environments \
+              --environment-names "${ENV_NAME}" \
+              --query 'Environments[0].Status' \
+              --output text \
+              --region ${{ env.AWS_REGION }})
+            
+            if [ "$status" = "Ready" ]; then
+              echo "✅ Staging deployment completed"
+              break
+            elif [ "$status" = "Updating" ] || [ "$status" = "Launching" ]; then
+              echo "Status: $status (attempt $((attempt+1))/$max_attempts)"
+              sleep 30
+              attempt=$((attempt+1))
+            else
+              echo "❌ Unexpected status: $status"
+              exit 1
+            fi
+          done
+          
+          if [ $attempt -ge $max_attempts ]; then
+            echo "⚠️  Timeout reached, checking final status..."
+            final_status=$(aws elasticbeanstalk describe-environments \
+              --environment-names "${ENV_NAME}" \
+              --query 'Environments[0].{Status:Status,Health:Health}' \
+              --output json \
+              --region ${{ env.AWS_REGION }})
+            echo "$final_status"
+            # Don't fail if environment is actually Ready
+            status=$(echo "$final_status" | jq -r '.Status')
+            if [ "$status" != "Ready" ]; then
+              exit 1
+            fi
+            echo "✅ Environment is Ready despite timeout"
+          fi
       
       - name: Get environment URL
         id: get-url
@@ -547,12 +580,45 @@ jobs:
           ENV_NAME="${{ needs.deploy-infrastructure-production.outputs.environment-name }}"
           
           echo "⏳ Waiting for production environment to be ready..."
-          aws elasticbeanstalk wait environment-updated \
-            --application-name "${APP_NAME}" \
-            --environment-name "${ENV_NAME}" \
-            --region ${{ env.AWS_REGION }}
           
-          echo "✅ Production deployment completed"
+          # Custom wait with better timeout handling
+          max_attempts=50
+          attempt=0
+          while [ $attempt -lt $max_attempts ]; do
+            status=$(aws elasticbeanstalk describe-environments \
+              --environment-names "${ENV_NAME}" \
+              --query 'Environments[0].Status' \
+              --output text \
+              --region ${{ env.AWS_REGION }})
+            
+            if [ "$status" = "Ready" ]; then
+              echo "✅ Production deployment completed"
+              break
+            elif [ "$status" = "Updating" ] || [ "$status" = "Launching" ]; then
+              echo "Status: $status (attempt $((attempt+1))/$max_attempts)"
+              sleep 30
+              attempt=$((attempt+1))
+            else
+              echo "❌ Unexpected status: $status"
+              exit 1
+            fi
+          done
+          
+          if [ $attempt -ge $max_attempts ]; then
+            echo "⚠️  Timeout reached, checking final status..."
+            final_status=$(aws elasticbeanstalk describe-environments \
+              --environment-names "${ENV_NAME}" \
+              --query 'Environments[0].{Status:Status,Health:Health}' \
+              --output json \
+              --region ${{ env.AWS_REGION }})
+            echo "$final_status"
+            # Don't fail if environment is actually Ready
+            status=$(echo "$final_status" | jq -r '.Status')
+            if [ "$status" != "Ready" ]; then
+              exit 1
+            fi
+            echo "✅ Environment is Ready despite timeout"
+          fi
       
       - name: Get environment URL
         id: get-url
