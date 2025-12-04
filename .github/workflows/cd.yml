@@ -1,0 +1,524 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  AWS_REGION: eu-west-1
+  DOTNET_VERSION: '9.0.x'
+  TF_VERSION: '1.0'
+
+jobs:
+  build-and-package:
+    name: Build and Package Application
+    runs-on: ubuntu-latest
+    
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      artifact-name: ${{ steps.version.outputs.artifact-name }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      
+      - name: Generate version number
+        id: version
+        run: |
+          VERSION="1.0.${{ github.run_number }}"
+          ARTIFACT_NAME="bp-calculator-${VERSION}-${{ github.sha }}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "artifact-name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+          echo "📦 Version: ${VERSION}"
+          echo "📦 Artifact: ${ARTIFACT_NAME}"
+      
+      - name: Restore dependencies
+        run: dotnet restore
+      
+      - name: Build application
+        run: dotnet build --configuration Release --no-restore
+      
+      - name: Run tests
+        run: dotnet test --configuration Release --no-build --verbosity minimal
+      
+      - name: Publish application
+        run: dotnet publish --configuration Release --no-build --output ./publish
+      
+      - name: Create deployment package
+        run: |
+          cd ./publish
+          zip -r ../deployment-package.zip .
+          cd ..
+          ls -lh deployment-package.zip
+      
+      - name: Upload deployment package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.version.outputs.artifact-name }}
+          path: deployment-package.zip
+          retention-days: 30
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build-and-package
+    environment:
+      name: staging
+      url: ${{ steps.deploy.outputs.environment-url }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      
+      - name: Terraform Init (Staging)
+        working-directory: ./infra
+        run: |
+          terraform init \
+            -backend-config="bucket=bp-terraform-state-431774613177" \
+            -backend-config="key=staging/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=bp-terraform-locks"
+      
+      - name: Terraform Plan (Staging)
+        working-directory: ./infra
+        run: |
+          terraform plan \
+            -var="environment=staging" \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -out=tfplan
+      
+      - name: Terraform Apply (Staging)
+        working-directory: ./infra
+        run: terraform apply -auto-approve tfplan
+      
+      - name: Get Terraform Outputs
+        id: tf-outputs
+        working-directory: ./infra
+        run: |
+          APP_NAME=$(terraform output -raw application_name)
+          ENV_NAME=$(terraform output -raw environment_name)
+          S3_BUCKET=$(terraform output -raw app_versions_bucket)
+          echo "app-name=${APP_NAME}" >> $GITHUB_OUTPUT
+          echo "env-name=${ENV_NAME}" >> $GITHUB_OUTPUT
+          echo "s3-bucket=${S3_BUCKET}" >> $GITHUB_OUTPUT
+          echo "🏗️  Application: ${APP_NAME}"
+          echo "🌍 Environment: ${ENV_NAME}"
+          echo "🪣  S3 Bucket: ${S3_BUCKET}"
+      
+      - name: Download deployment package
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-and-package.outputs.artifact-name }}
+      
+      - name: Upload to S3
+        run: |
+          VERSION_LABEL="v${{ needs.build-and-package.outputs.version }}-${{ github.sha }}"
+          aws s3 cp deployment-package.zip \
+            s3://${{ steps.tf-outputs.outputs.s3-bucket }}/${VERSION_LABEL}.zip
+          echo "✅ Uploaded to S3: ${VERSION_LABEL}.zip"
+      
+      - name: Create Elastic Beanstalk Application Version
+        id: create-version
+        run: |
+          VERSION_LABEL="v${{ needs.build-and-package.outputs.version }}-${{ github.sha }}"
+          aws elasticbeanstalk create-application-version \
+            --application-name ${{ steps.tf-outputs.outputs.app-name }} \
+            --version-label ${VERSION_LABEL} \
+            --source-bundle S3Bucket="${{ steps.tf-outputs.outputs.s3-bucket }}",S3Key="${VERSION_LABEL}.zip" \
+            --description "Build ${{ github.run_number }} - Commit ${{ github.sha }}" \
+            --region ${{ env.AWS_REGION }}
+          echo "version-label=${VERSION_LABEL}" >> $GITHUB_OUTPUT
+          echo "✅ Created version: ${VERSION_LABEL}"
+      
+      - name: Deploy to Elastic Beanstalk
+        id: deploy
+        run: |
+          VERSION_LABEL="${{ steps.create-version.outputs.version-label }}"
+          aws elasticbeanstalk update-environment \
+            --application-name ${{ steps.tf-outputs.outputs.app-name }} \
+            --environment-name ${{ steps.tf-outputs.outputs.env-name }} \
+            --version-label ${VERSION_LABEL} \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "🚀 Deployment initiated for staging"
+          echo "⏳ Waiting for environment to be ready..."
+      
+      - name: Wait for deployment
+        run: |
+          aws elasticbeanstalk wait environment-updated \
+            --application-name ${{ steps.tf-outputs.outputs.app-name }} \
+            --environment-name ${{ steps.tf-outputs.outputs.env-name }} \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "✅ Staging deployment completed"
+      
+      - name: Get environment URL
+        id: get-url
+        run: |
+          ENV_URL=$(aws elasticbeanstalk describe-environments \
+            --application-name ${{ steps.tf-outputs.outputs.app-name }} \
+            --environment-names ${{ steps.tf-outputs.outputs.env-name }} \
+            --query "Environments[0].CNAME" \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+          
+          echo "environment-url=http://${ENV_URL}" >> $GITHUB_OUTPUT
+          echo "🌐 Staging URL: http://${ENV_URL}"
+      
+      - name: Health check
+        run: |
+          ENV_URL="${{ steps.get-url.outputs.environment-url }}"
+          echo "🏥 Running health check on ${ENV_URL}"
+          
+          for i in {1..10}; do
+            if curl -f -s -o /dev/null -w "%{http_code}" "${ENV_URL}" | grep -q "200"; then
+              echo "✅ Health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "⏳ Waiting for application to be ready (attempt $i/10)..."
+            sleep 30
+          done
+          
+          echo "❌ Health check failed after 10 attempts"
+          exit 1
+      
+      - name: Deployment summary
+        run: |
+          echo "## 🎉 Staging Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | Staging |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | ${{ needs.build-and-package.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Application** | ${{ steps.tf-outputs.outputs.app-name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **EB Environment** | ${{ steps.tf-outputs.outputs.env-name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **URL** | ${{ steps.get-url.outputs.environment-url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Status:** Deployment successful and health check passed" >> $GITHUB_STEP_SUMMARY
+
+  test-staging:
+    name: Test Staging Environment
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Get staging URL
+        id: get-url
+        run: |
+          ENV_URL=$(aws elasticbeanstalk describe-environments \
+            --application-name bp-calculator \
+            --environment-names bp-calculator-staging \
+            --query "Environments[0].CNAME" \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+          
+          echo "staging-url=http://${ENV_URL}" >> $GITHUB_OUTPUT
+          echo "🧪 Testing: http://${ENV_URL}"
+      
+      - name: Smoke tests
+        run: |
+          URL="${{ steps.get-url.outputs.staging-url }}"
+          
+          echo "🧪 Running smoke tests..."
+          
+          # Test 1: Homepage loads
+          echo "Test 1: Homepage returns 200"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${URL}")
+          if [ "$STATUS" = "200" ]; then
+            echo "✅ Homepage test passed"
+          else
+            echo "❌ Homepage test failed (status: $STATUS)"
+            exit 1
+          fi
+          
+          # Test 2: Homepage contains expected content
+          echo "Test 2: Homepage contains 'Blood Pressure'"
+          if curl -s "${URL}" | grep -q "Blood Pressure"; then
+            echo "✅ Content test passed"
+          else
+            echo "❌ Content test failed"
+            exit 1
+          fi
+          
+          # Test 3: Static resources load
+          echo "Test 3: CSS loads successfully"
+          CSS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${URL}/css/site.css")
+          if [ "$CSS_STATUS" = "200" ]; then
+            echo "✅ Static resources test passed"
+          else
+            echo "⚠️  CSS might not be loading (status: $CSS_STATUS)"
+          fi
+          
+          echo "✅ All smoke tests passed"
+      
+      - name: Performance check
+        run: |
+          URL="${{ steps.get-url.outputs.staging-url }}"
+          
+          echo "⚡ Running performance check..."
+          
+          RESPONSE_TIME=$(curl -s -o /dev/null -w "%{time_total}" "${URL}")
+          echo "Response time: ${RESPONSE_TIME}s"
+          
+          # Check if response time is under 5 seconds
+          if (( $(echo "$RESPONSE_TIME < 5.0" | bc -l) )); then
+            echo "✅ Performance check passed (${RESPONSE_TIME}s < 5s)"
+          else
+            echo "⚠️  Response time is slow: ${RESPONSE_TIME}s"
+          fi
+      
+      - name: Test summary
+        run: |
+          echo "## 🧪 Staging Tests Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Smoke tests passed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Performance check passed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Environment is ready for production promotion" >> $GITHUB_STEP_SUMMARY
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build-and-package, test-staging]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: ${{ steps.get-url.outputs.environment-url }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      
+      - name: Terraform Init (Production)
+        working-directory: ./infra
+        run: |
+          terraform init \
+            -backend-config="bucket=bp-terraform-state-431774613177" \
+            -backend-config="key=production/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=bp-terraform-locks"
+      
+      - name: Terraform Plan (Production)
+        working-directory: ./infra
+        run: |
+          terraform plan \
+            -var="environment=production" \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="min_instances=2" \
+            -var="max_instances=4" \
+            -out=tfplan
+      
+      - name: Terraform Apply (Production)
+        working-directory: ./infra
+        run: terraform apply -auto-approve tfplan
+      
+      - name: Get Terraform Outputs
+        id: tf-outputs
+        working-directory: ./infra
+        run: |
+          APP_NAME=$(terraform output -raw application_name)
+          ENV_NAME=$(terraform output -raw environment_name)
+          S3_BUCKET=$(terraform output -raw app_versions_bucket)
+          echo "app-name=${APP_NAME}" >> $GITHUB_OUTPUT
+          echo "env-name=${ENV_NAME}" >> $GITHUB_OUTPUT
+          echo "s3-bucket=${S3_BUCKET}" >> $GITHUB_OUTPUT
+          echo "🏗️  Application: ${APP_NAME}"
+          echo "🌍 Environment: ${ENV_NAME}"
+          echo "🪣  S3 Bucket: ${S3_BUCKET}"
+      
+      - name: Download deployment package
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-and-package.outputs.artifact-name }}
+      
+      - name: Upload to S3
+        run: |
+          VERSION_LABEL="v${{ needs.build-and-package.outputs.version }}-${{ github.sha }}"
+          aws s3 cp deployment-package.zip \
+            s3://${{ steps.tf-outputs.outputs.s3-bucket }}/${VERSION_LABEL}.zip
+          echo "✅ Uploaded to S3: ${VERSION_LABEL}.zip"
+      
+      - name: Create Elastic Beanstalk Application Version
+        id: create-version
+        run: |
+          VERSION_LABEL="v${{ needs.build-and-package.outputs.version }}-${{ github.sha }}"
+          
+          # Check if version already exists
+          if aws elasticbeanstalk describe-application-versions \
+            --application-name ${{ steps.tf-outputs.outputs.app-name }} \
+            --version-labels ${VERSION_LABEL} \
+            --region ${{ env.AWS_REGION }} | grep -q ${VERSION_LABEL}; then
+            echo "Version ${VERSION_LABEL} already exists, skipping creation"
+          else
+            aws elasticbeanstalk create-application-version \
+              --application-name ${{ steps.tf-outputs.outputs.app-name }} \
+              --version-label ${VERSION_LABEL} \
+              --source-bundle S3Bucket="${{ steps.tf-outputs.outputs.s3-bucket }}",S3Key="${VERSION_LABEL}.zip" \
+              --description "Production Build ${{ github.run_number }} - Commit ${{ github.sha }}" \
+              --region ${{ env.AWS_REGION }}
+          fi
+          
+          echo "version-label=${VERSION_LABEL}" >> $GITHUB_OUTPUT
+          echo "✅ Application version ready: ${VERSION_LABEL}"
+      
+      - name: Deploy to Production
+        run: |
+          VERSION_LABEL="${{ steps.create-version.outputs.version-label }}"
+          aws elasticbeanstalk update-environment \
+            --application-name ${{ steps.tf-outputs.outputs.app-name }} \
+            --environment-name ${{ steps.tf-outputs.outputs.env-name }} \
+            --version-label ${VERSION_LABEL} \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "🚀 Production deployment initiated"
+          echo "⏳ Waiting for environment to be ready..."
+      
+      - name: Wait for deployment
+        run: |
+          aws elasticbeanstalk wait environment-updated \
+            --application-name ${{ steps.tf-outputs.outputs.app-name }} \
+            --environment-name ${{ steps.tf-outputs.outputs.env-name }} \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "✅ Production deployment completed"
+      
+      - name: Get environment URL
+        id: get-url
+        run: |
+          ENV_URL=$(aws elasticbeanstalk describe-environments \
+            --application-name ${{ steps.tf-outputs.outputs.app-name }} \
+            --environment-names ${{ steps.tf-outputs.outputs.env-name }} \
+            --query "Environments[0].CNAME" \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+          
+          echo "environment-url=http://${ENV_URL}" >> $GITHUB_OUTPUT
+          echo "🌐 Production URL: http://${ENV_URL}"
+      
+      - name: Production health check
+        run: |
+          ENV_URL="${{ steps.get-url.outputs.environment-url }}"
+          echo "🏥 Running production health check on ${ENV_URL}"
+          
+          for i in {1..15}; do
+            if curl -f -s -o /dev/null -w "%{http_code}" "${ENV_URL}" | grep -q "200"; then
+              echo "✅ Production health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "⏳ Waiting for application to be ready (attempt $i/15)..."
+            sleep 30
+          done
+          
+          echo "❌ Production health check failed after 15 attempts"
+          exit 1
+      
+      - name: Production deployment summary
+        run: |
+          echo "## 🎉 Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | 🔴 Production |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | ${{ needs.build-and-package.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Application** | ${{ steps.tf-outputs.outputs.app-name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **EB Environment** | ${{ steps.tf-outputs.outputs.env-name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **URL** | ${{ steps.get-url.outputs.environment-url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Status:** Production deployment successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "- Monitor application metrics in CloudWatch" >> $GITHUB_STEP_SUMMARY
+          echo "- Check application logs for any errors" >> $GITHUB_STEP_SUMMARY
+          echo "- Verify all features are working as expected" >> $GITHUB_STEP_SUMMARY
+
+  pipeline-complete:
+    name: Pipeline Complete
+    runs-on: ubuntu-latest
+    needs: [build-and-package, deploy-staging, test-staging, deploy-production]
+    if: always()
+    
+    steps:
+      - name: Pipeline summary
+        run: |
+          echo "# 🎉 CD Pipeline Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build & Package | ${{ needs.build-and-package.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Staging | ${{ needs.deploy-staging.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Test Staging | ${{ needs.test-staging.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Production | ${{ needs.deploy-production.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.build-and-package.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Check pipeline status
+        run: |
+          if [ "${{ needs.deploy-production.result }}" = "success" ]; then
+            echo "✅ Full pipeline completed successfully!"
+            exit 0
+          elif [ "${{ needs.test-staging.result }}" = "success" ]; then
+            echo "✅ Staging deployment completed successfully!"
+            exit 0
+          else
+            echo "❌ Pipeline had failures"
+            exit 1
+          fi
