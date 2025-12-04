@@ -54,7 +54,7 @@ variable "enable_cloudwatch_alarms" {
 variable "solution_stack_name" {
   description = "Elastic Beanstalk solution stack name"
   type        = string
-  default     = "64bit Amazon Linux 2023 v3.2.4 running .NET 8"
+  default     = "64bit Amazon Linux 2023 v3.6.0 running .NET 8"
 }
 
 variable "vpc_cidr" {
