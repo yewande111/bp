@@ -75,5 +75,29 @@ namespace BPCalculator.Tests.StepDefinitions
             Assert.NotNull(_exception);
             Assert.Contains(expectedMessage, _exception.Message);
         }
+
+        // Category Explanation Steps
+        private string? _explanation;
+
+        [When(@"I request an explanation for ""(.*)"" category")]
+        public void WhenIRequestAnExplanationForCategory(string categoryName)
+        {
+            var category = Enum.Parse<BPCategory>(categoryName);
+            _explanation = BloodPressure.GetCategoryExplanation(category);
+        }
+
+        [Then(@"the explanation should contain ""(.*)""")]
+        public void ThenTheExplanationShouldContain(string keyword)
+        {
+            Assert.NotNull(_explanation);
+            Assert.Contains(keyword, _explanation, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Then(@"the explanation should not be empty")]
+        public void ThenTheExplanationShouldNotBeEmpty()
+        {
+            Assert.NotNull(_explanation);
+            Assert.NotEmpty(_explanation);
+        }
     }
 }
