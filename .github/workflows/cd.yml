@@ -21,6 +21,8 @@ env:
   AWS_REGION: eu-west-1
   DOTNET_VERSION: '9.0.x'
   TF_VERSION: '1.0'
+  SOLUTION_PATH: './BPCalculator.sln'
+  PROJECT_PATH: './BPCalculator/BPCalculator.csproj'
 
 jobs:
   build-and-package:
@@ -29,7 +31,9 @@ jobs:
     
     outputs:
       version: ${{ steps.version.outputs.version }}
+      version-label: ${{ steps.version.outputs.label }}
       artifact-name: ${{ steps.version.outputs.artifact-name }}
+      artifact-key: ${{ steps.version.outputs.artifact-key }}
     
     steps:
       - name: Checkout code
@@ -43,37 +47,46 @@ jobs:
       - name: Generate version number
         id: version
         run: |
+          VERSION_LABEL="v$(date +%Y%m%d-%H%M%S)-${GITHUB_SHA:0:7}"
           VERSION="1.0.${{ github.run_number }}"
-          ARTIFACT_NAME="bp-calculator-${VERSION}-${{ github.sha }}"
+          ARTIFACT_KEY="bp-app-${VERSION_LABEL}.zip"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "artifact-name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+          echo "label=${VERSION_LABEL}" >> $GITHUB_OUTPUT
+          echo "artifact-name=deployment-package" >> $GITHUB_OUTPUT
+          echo "artifact-key=${ARTIFACT_KEY}" >> $GITHUB_OUTPUT
           echo "📦 Version: ${VERSION}"
-          echo "📦 Artifact: ${ARTIFACT_NAME}"
+          echo "📦 Label: ${VERSION_LABEL}"
+          echo "📦 Artifact Key: ${ARTIFACT_KEY}"
       
       - name: Restore dependencies
-        run: dotnet restore
+        run: dotnet restore ${{ env.SOLUTION_PATH }}
       
       - name: Build application
-        run: dotnet build --configuration Release --no-restore
+        run: dotnet build ${{ env.SOLUTION_PATH }} -c Release --no-restore
       
       - name: Run tests
-        run: dotnet test --configuration Release --no-build --verbosity minimal
+        run: dotnet test ${{ env.SOLUTION_PATH }} -c Release --no-build --verbosity minimal
       
       - name: Publish application
-        run: dotnet publish --configuration Release --no-build --output ./publish
+        run: |
+          dotnet publish ${{ env.PROJECT_PATH }} \
+            -c Release \
+            -o ./publish \
+            --no-build
       
       - name: Create deployment package
         run: |
           cd ./publish
-          zip -r ../deployment-package.zip .
+          zip -r ../${{ steps.version.outputs.artifact-key }} .
           cd ..
-          ls -lh deployment-package.zip
+          echo "📦 Package: ${{ steps.version.outputs.artifact-key }}"
+          echo "📦 Size: $(du -h ${{ steps.version.outputs.artifact-key }} | cut -f1)"
       
       - name: Upload deployment package
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.version.outputs.artifact-name }}
-          path: deployment-package.zip
+          path: ${{ steps.version.outputs.artifact-key }}
           retention-days: 30
 
   deploy-staging:
@@ -142,22 +155,33 @@ jobs:
           name: ${{ needs.build-and-package.outputs.artifact-name }}
       
       - name: Upload to S3
+        id: s3-upload
         run: |
-          VERSION_LABEL="v${{ needs.build-and-package.outputs.version }}-${{ github.sha }}"
-          aws s3 cp deployment-package.zip \
-            s3://${{ steps.tf-outputs.outputs.s3-bucket }}/${VERSION_LABEL}.zip
-          echo "✅ Uploaded to S3: ${VERSION_LABEL}.zip"
+          ARTIFACT_KEY="${{ needs.build-and-package.outputs.artifact-key }}"
+          VERSION_LABEL="${{ needs.build-and-package.outputs.version-label }}"
+          S3_BUCKET="${{ steps.tf-outputs.outputs.s3-bucket }}"
+          S3_KEY="applications/bp-calculator/${ARTIFACT_KEY}"
+          
+          echo "📦 Uploading ${ARTIFACT_KEY} to s3://${S3_BUCKET}/${S3_KEY}"
+          aws s3 cp "${ARTIFACT_KEY}" "s3://${S3_BUCKET}/${S3_KEY}"
+          
+          echo "s3-key=${S3_KEY}" >> $GITHUB_OUTPUT
+          echo "✅ Uploaded to S3"
       
       - name: Create Elastic Beanstalk Application Version
         id: create-version
         run: |
-          VERSION_LABEL="v${{ needs.build-and-package.outputs.version }}-${{ github.sha }}"
+          VERSION_LABEL="${{ needs.build-and-package.outputs.version-label }}"
+          S3_KEY="${{ steps.s3-upload.outputs.s3-key }}"
+          
+          echo "📦 Creating EB application version: ${VERSION_LABEL}"
           aws elasticbeanstalk create-application-version \
             --application-name ${{ steps.tf-outputs.outputs.app-name }} \
-            --version-label ${VERSION_LABEL} \
-            --source-bundle S3Bucket="${{ steps.tf-outputs.outputs.s3-bucket }}",S3Key="${VERSION_LABEL}.zip" \
-            --description "Build ${{ github.run_number }} - Commit ${{ github.sha }}" \
+            --version-label "${VERSION_LABEL}" \
+            --source-bundle S3Bucket="${{ steps.tf-outputs.outputs.s3-bucket }}",S3Key="${S3_KEY}" \
+            --description "Build ${{ github.run_number }} - Commit ${GITHUB_SHA:0:7}" \
             --region ${{ env.AWS_REGION }}
+          
           echo "version-label=${VERSION_LABEL}" >> $GITHUB_OUTPUT
           echo "✅ Created version: ${VERSION_LABEL}"
       
@@ -165,17 +189,19 @@ jobs:
         id: deploy
         run: |
           VERSION_LABEL="${{ steps.create-version.outputs.version-label }}"
+          
+          echo "🚀 Deploying ${VERSION_LABEL} to staging..."
           aws elasticbeanstalk update-environment \
             --application-name ${{ steps.tf-outputs.outputs.app-name }} \
             --environment-name ${{ steps.tf-outputs.outputs.env-name }} \
-            --version-label ${VERSION_LABEL} \
+            --version-label "${VERSION_LABEL}" \
             --region ${{ env.AWS_REGION }}
           
-          echo "🚀 Deployment initiated for staging"
           echo "⏳ Waiting for environment to be ready..."
       
       - name: Wait for deployment
         run: |
+          echo "⏳ Waiting for staging environment to be ready..."
           aws elasticbeanstalk wait environment-updated \
             --application-name ${{ steps.tf-outputs.outputs.app-name }} \
             --environment-name ${{ steps.tf-outputs.outputs.env-name }} \
@@ -385,31 +411,46 @@ jobs:
         with:
           name: ${{ needs.build-and-package.outputs.artifact-name }}
       
-      - name: Upload to S3
+      - name: Upload to S3 (if not exists)
+        id: s3-upload
         run: |
-          VERSION_LABEL="v${{ needs.build-and-package.outputs.version }}-${{ github.sha }}"
-          aws s3 cp deployment-package.zip \
-            s3://${{ steps.tf-outputs.outputs.s3-bucket }}/${VERSION_LABEL}.zip
-          echo "✅ Uploaded to S3: ${VERSION_LABEL}.zip"
+          ARTIFACT_KEY="${{ needs.build-and-package.outputs.artifact-key }}"
+          VERSION_LABEL="${{ needs.build-and-package.outputs.version-label }}"
+          S3_BUCKET="${{ steps.tf-outputs.outputs.s3-bucket }}"
+          S3_KEY="applications/bp-calculator/${ARTIFACT_KEY}"
+          
+          # Check if already uploaded (from staging deployment)
+          if aws s3 ls "s3://${S3_BUCKET}/${S3_KEY}" > /dev/null 2>&1; then
+            echo "ℹ️  Artifact already exists in S3"
+          else
+            echo "📦 Uploading ${ARTIFACT_KEY} to s3://${S3_BUCKET}/${S3_KEY}"
+            aws s3 cp "${ARTIFACT_KEY}" "s3://${S3_BUCKET}/${S3_KEY}"
+          fi
+          
+          echo "s3-key=${S3_KEY}" >> $GITHUB_OUTPUT
+          echo "✅ S3 upload verified"
       
       - name: Create Elastic Beanstalk Application Version
         id: create-version
         run: |
-          VERSION_LABEL="v${{ needs.build-and-package.outputs.version }}-${{ github.sha }}"
+          VERSION_LABEL="${{ needs.build-and-package.outputs.version-label }}"
+          S3_KEY="${{ steps.s3-upload.outputs.s3-key }}"
           
-          # Check if version already exists
+          # Check if version already exists (created during staging deployment)
           if aws elasticbeanstalk describe-application-versions \
             --application-name ${{ steps.tf-outputs.outputs.app-name }} \
-            --version-labels ${VERSION_LABEL} \
-            --region ${{ env.AWS_REGION }} | grep -q ${VERSION_LABEL}; then
-            echo "Version ${VERSION_LABEL} already exists, skipping creation"
+            --version-labels "${VERSION_LABEL}" \
+            --region ${{ env.AWS_REGION }} | grep -q "${VERSION_LABEL}"; then
+            echo "ℹ️  Version ${VERSION_LABEL} already exists"
           else
+            echo "📦 Creating EB application version: ${VERSION_LABEL}"
             aws elasticbeanstalk create-application-version \
               --application-name ${{ steps.tf-outputs.outputs.app-name }} \
-              --version-label ${VERSION_LABEL} \
-              --source-bundle S3Bucket="${{ steps.tf-outputs.outputs.s3-bucket }}",S3Key="${VERSION_LABEL}.zip" \
-              --description "Production Build ${{ github.run_number }} - Commit ${{ github.sha }}" \
+              --version-label "${VERSION_LABEL}" \
+              --source-bundle S3Bucket="${{ steps.tf-outputs.outputs.s3-bucket }}",S3Key="${S3_KEY}" \
+              --description "Production Build ${{ github.run_number }} - Commit ${GITHUB_SHA:0:7}" \
               --region ${{ env.AWS_REGION }}
+            echo "✅ Created version: ${VERSION_LABEL}"
           fi
           
           echo "version-label=${VERSION_LABEL}" >> $GITHUB_OUTPUT
@@ -418,17 +459,19 @@ jobs:
       - name: Deploy to Production
         run: |
           VERSION_LABEL="${{ steps.create-version.outputs.version-label }}"
+          
+          echo "🚀 Deploying ${VERSION_LABEL} to production..."
           aws elasticbeanstalk update-environment \
             --application-name ${{ steps.tf-outputs.outputs.app-name }} \
             --environment-name ${{ steps.tf-outputs.outputs.env-name }} \
-            --version-label ${VERSION_LABEL} \
+            --version-label "${VERSION_LABEL}" \
             --region ${{ env.AWS_REGION }}
           
-          echo "🚀 Production deployment initiated"
           echo "⏳ Waiting for environment to be ready..."
       
       - name: Wait for deployment
         run: |
+          echo "⏳ Waiting for production environment to be ready..."
           aws elasticbeanstalk wait environment-updated \
             --application-name ${{ steps.tf-outputs.outputs.app-name }} \
             --environment-name ${{ steps.tf-outputs.outputs.env-name }} \
