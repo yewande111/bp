@@ -147,3 +147,15 @@ Scenario: Edge case - Maximum valid values
     And diastolic pressure is 100
     When I calculate the blood pressure category
     Then the result should be "High"
+
+Scenario Outline: Category explanation provides helpful information
+    When I request an explanation for "<category>" category
+    Then the explanation should contain "<keyword>"
+    And the explanation should not be empty
+
+    Examples:
+    | category | keyword            |
+    | Low      | dizziness          |
+    | Ideal    | healthy            |
+    | PreHigh  | lifestyle          |
+    | High     | healthcare provider|

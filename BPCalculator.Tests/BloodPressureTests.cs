@@ -366,5 +366,77 @@ namespace BPCalculator.Tests
         }
 
         #endregion
+
+        #region Category Explanation Tests
+
+        [Fact]
+        public void GetCategoryExplanation_LowCategory_ReturnsLowExplanation()
+        {
+            // Act
+            var explanation = BloodPressure.GetCategoryExplanation(BPCategory.Low);
+
+            // Assert
+            Assert.NotNull(explanation);
+            Assert.NotEmpty(explanation);
+            Assert.Contains("low", explanation, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("dizziness", explanation, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void GetCategoryExplanation_IdealCategory_ReturnsIdealExplanation()
+        {
+            // Act
+            var explanation = BloodPressure.GetCategoryExplanation(BPCategory.Ideal);
+
+            // Assert
+            Assert.NotNull(explanation);
+            Assert.NotEmpty(explanation);
+            Assert.Contains("ideal", explanation, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("healthy", explanation, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void GetCategoryExplanation_PreHighCategory_ReturnsPreHighExplanation()
+        {
+            // Act
+            var explanation = BloodPressure.GetCategoryExplanation(BPCategory.PreHigh);
+
+            // Assert
+            Assert.NotNull(explanation);
+            Assert.NotEmpty(explanation);
+            Assert.Contains("pre-high", explanation, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("lifestyle", explanation, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void GetCategoryExplanation_HighCategory_ReturnsHighExplanation()
+        {
+            // Act
+            var explanation = BloodPressure.GetCategoryExplanation(BPCategory.High);
+
+            // Assert
+            Assert.NotNull(explanation);
+            Assert.NotEmpty(explanation);
+            Assert.Contains("high", explanation, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("healthcare provider", explanation, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void GetCategoryExplanation_AllCategories_ReturnNonEmptyStrings()
+        {
+            // Arrange
+            var categories = new[] { BPCategory.Low, BPCategory.Ideal, BPCategory.PreHigh, BPCategory.High };
+
+            // Act & Assert
+            foreach (var category in categories)
+            {
+                var explanation = BloodPressure.GetCategoryExplanation(category);
+                Assert.NotNull(explanation);
+                Assert.NotEmpty(explanation);
+                Assert.True(explanation.Length > 20, $"Explanation for {category} should be meaningful");
+            }
+        }
+
+        #endregion
     }
 }

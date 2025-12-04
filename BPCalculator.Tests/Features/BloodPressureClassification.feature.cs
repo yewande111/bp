@@ -920,6 +920,46 @@ this.FeatureBackground();
             this.ScenarioCleanup();
         }
         
+        [Xunit.SkippableTheoryAttribute(DisplayName="Category explanation provides helpful information")]
+        [Xunit.TraitAttribute("FeatureTitle", "Blood Pressure Classification")]
+        [Xunit.TraitAttribute("Description", "Category explanation provides helpful information")]
+        [Xunit.InlineDataAttribute("Low", "dizziness", new string[0])]
+        [Xunit.InlineDataAttribute("Ideal", "healthy", new string[0])]
+        [Xunit.InlineDataAttribute("PreHigh", "lifestyle", new string[0])]
+        [Xunit.InlineDataAttribute("High", "healthcare provider", new string[0])]
+        public void CategoryExplanationProvidesHelpfulInformation(string category, string keyword, string[] exampleTags)
+        {
+            string[] tagsOfScenario = exampleTags;
+            System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new System.Collections.Specialized.OrderedDictionary();
+            argumentsOfScenario.Add("category", category);
+            argumentsOfScenario.Add("keyword", keyword);
+            TechTalk.SpecFlow.ScenarioInfo scenarioInfo = new TechTalk.SpecFlow.ScenarioInfo("Category explanation provides helpful information", null, tagsOfScenario, argumentsOfScenario, featureTags);
+#line 151
+this.ScenarioInitialize(scenarioInfo);
+#line hidden
+            if ((TagHelper.ContainsIgnoreTag(tagsOfScenario) || TagHelper.ContainsIgnoreTag(featureTags)))
+            {
+                testRunner.SkipScenario();
+            }
+            else
+            {
+                this.ScenarioStart();
+#line 6
+this.FeatureBackground();
+#line hidden
+#line 152
+    testRunner.When(string.Format("I request an explanation for \"{0}\" category", category), ((string)(null)), ((TechTalk.SpecFlow.Table)(null)), "When ");
+#line hidden
+#line 153
+    testRunner.Then(string.Format("the explanation should contain \"{0}\"", keyword), ((string)(null)), ((TechTalk.SpecFlow.Table)(null)), "Then ");
+#line hidden
+#line 154
+    testRunner.And("the explanation should not be empty", ((string)(null)), ((TechTalk.SpecFlow.Table)(null)), "And ");
+#line hidden
+            }
+            this.ScenarioCleanup();
+        }
+        
         [System.CodeDom.Compiler.GeneratedCodeAttribute("TechTalk.SpecFlow", "3.9.0.0")]
         [System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
         public class FixtureData : System.IDisposable
