@@ -178,3 +178,51 @@ terraform plan -var-file="env/production.tfvars"
 
 ---
 *End of Phase 0.3*
+
+## Phase 0.4: Setup Cost Management and Cleanup Plan ✅
+
+**Date:** December 4, 2025  
+**Status:** COMPLETE
+
+### Actions Completed:
+1. ✅ Reviewed AWS Free Tier limits
+2. ✅ Calculated estimated costs for different scenarios
+3. ✅ Created comprehensive cost management plan
+4. ✅ Documented cleanup procedures
+5. ✅ Established post-submission timeline
+
+### Cost Analysis Summary:
+
+#### Estimated Monthly Costs:
+- **Both environments 24/7:** ~$15.16/month
+- **Production only:** ~$7.60/month  
+- **Optimized (staging on-demand):** ~$8.02/month
+
+#### Project Timeline Cost (Dec 4-10, 2025):
+- **7 days, both environments:** ~$3.52 total
+- **7 days, optimized approach:** ~$1.87 total
+
+### Key Findings:
+- ⚠️ Two t3.micro instances running 24/7 exceeds free tier (1,440 hours vs 750 hours)
+- ✅ S3, DynamoDB, CloudWatch usage well within free tier limits
+- ✅ Cost is manageable for short project duration
+- ✅ Complete cleanup possible with automated scripts
+
+### Cost Optimization Strategies:
+1. **Destroy staging when not testing** (saves ~$7.56/month)
+2. **Set up AWS budget alerts** ($5, $10, $15 thresholds)
+3. **Destroy all resources after submission** (Dec 11+)
+4. **Monitor costs daily** during development
+
+### Cleanup Timeline:
+- **During Development (Dec 4-10):** Keep production, destroy staging nightly
+- **Dec 11:** Destroy staging environment
+- **Dec 12:** Destroy production environment  
+- **Dec 13:** Delete all artifact buckets
+- **Dec 14:** (Optional) Delete Terraform backend
+
+### Documentation Created:
+- `COST_MANAGEMENT.md` - Comprehensive cost analysis and cleanup procedures
+
+---
+*End of Phase 0.4*
