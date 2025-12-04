@@ -30,6 +30,8 @@ namespace BPCalculator
                 .ConfigureWebHostDefaults(webBuilder =>
                 {
                     webBuilder.UseStartup<Startup>();
+                    // Configure to listen on all network interfaces for Elastic Beanstalk
+                    webBuilder.UseUrls("http://0.0.0.0:5000");
                 });
     }
 }
