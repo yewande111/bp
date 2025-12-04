@@ -37,11 +37,17 @@ Blood Pressure Category Calculator web application with complete CI/CD pipeline 
 - ✅ Automated deployment scripts
 
 ### CI/CD Pipeline
-- ✅ GitHub Actions CI workflow
-- ✅ Automated build and test (55 tests)
-- ✅ Security scanning (OWASP Dependency Check)
-- ✅ Code quality checks (dotnet format)
-- ✅ Artifact generation (test results, coverage, security reports)
+- ✅ GitHub Actions CI workflow (Phase 4)
+  - Automated build and test (55 tests)
+  - Security scanning (OWASP Dependency Check)
+  - Code quality checks (dotnet format)
+  - Artifact generation (test results, coverage, security reports)
+- ✅ GitHub Actions CD workflow (Phase 5)
+  - Terraform infrastructure provisioning
+  - Multi-environment deployment (staging/production)
+  - Automated smoke and performance tests
+  - Manual approval gate for production
+  - Health monitoring and rollback capabilities
 
 ---
 
@@ -91,6 +97,7 @@ bp-app/
 ├── PHASE2_NOTES.md       # Phase 2 completion notes
 ├── PHASE3_NOTES.md       # Phase 3 completion notes (Terraform)
 ├── PHASE4_NOTES.md       # Phase 4 completion notes (CI Pipeline)
+├── PHASE5_NOTES.md       # Phase 5 completion notes (CD Pipeline)
 ├── COST_MANAGEMENT.md    # Cost analysis
 └── SCRIPTS_README.md     # Scripts documentation
 ```
@@ -109,7 +116,8 @@ bp-app/
   - Complete IaC: VPC, subnets, security groups, IAM, S3, Elastic Beanstalk, CloudWatch alarms
 - ✅ **Phase 4:** CI Pipeline (Complete)
   - GitHub Actions: build, test, security scan, code quality checks
-- ⬜ **Phase 5:** CD Pipeline
+- ✅ **Phase 5:** CD Pipeline (Complete)
+  - Terraform provisioning, multi-environment deployment, smoke tests, manual approval
 - ⬜ **Phase 6:** New Feature
 - ⬜ **Phase 7:** Evidence Collection
 - ⬜ **Phase 8:** Report & Video
@@ -124,6 +132,7 @@ bp-app/
 - [Phase 2 Notes](PHASE2_NOTES.md) - CloudWatch logging & telemetry
 - [Phase 3 Notes](PHASE3_NOTES.md) - Terraform infrastructure (20+ AWS resources)
 - [Phase 4 Notes](PHASE4_NOTES.md) - GitHub Actions CI Pipeline
+- [Phase 5 Notes](PHASE5_NOTES.md) - GitHub Actions CD Pipeline (deployment)
 - [Infrastructure Docs](infra/README.md) - Terraform setup
 - [Workflows Guide](.github/workflows/README.md) - CI/CD pipelines
 - [Scripts Guide](SCRIPTS_README.md) - Deployment automation
@@ -145,12 +154,13 @@ bp-app/
 
 ## 🎯 Current Status
 
-**Phases Complete:** 5/8 (62.5%)  
+**Phases Complete:** 6/8 (75%)  
 **Tests:** 55/55 Passing (100%)  
 **Coverage:** 100% on BP Logic  
 **CI Pipeline:** ✅ Running on GitHub Actions  
+**CD Pipeline:** ✅ Configured (ready for AWS deployment)  
 **Last Update:** December 4, 2025
 
 ---
 
-**Status:** Phases 0-4 Complete ✅ | Ready for Phase 5 (CD Pipeline) 🚀
+**Status:** Phases 0-5 Complete ✅ | Ready for Phase 6 (New Feature) 🚀
