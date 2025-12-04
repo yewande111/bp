@@ -89,13 +89,14 @@ jobs:
           path: ${{ steps.version.outputs.artifact-key }}
           retention-days: 30
 
-  deploy-staging:
-    name: Deploy to Staging
+  deploy-infrastructure-staging:
+    name: Deploy Infrastructure (Staging)
     runs-on: ubuntu-latest
     needs: build-and-package
-    environment:
-      name: staging
-      url: ${{ steps.deploy.outputs.environment-url }}
+    outputs:
+      application-name: ${{ steps.tf-outputs.outputs.app-name }}
+      environment-name: ${{ steps.tf-outputs.outputs.env-name }}
+      s3-bucket: ${{ steps.tf-outputs.outputs.s3-bucket }}
     
     steps:
       - name: Checkout code
@@ -117,6 +118,7 @@ jobs:
       - name: Terraform Init (Staging)
         working-directory: ./infra
         run: |
+          echo "🔧 Initializing Terraform for staging environment..."
           terraform init \
             -backend-config="bucket=bp-terraform-state-431774613177" \
             -backend-config="key=staging/terraform.tfstate" \
@@ -126,6 +128,7 @@ jobs:
       - name: Terraform Plan (Staging)
         working-directory: ./infra
         run: |
+          echo "📋 Planning infrastructure changes for staging..."
           terraform plan \
             -var="environment=staging" \
             -var="aws_region=${{ env.AWS_REGION }}" \
@@ -133,7 +136,10 @@ jobs:
       
       - name: Terraform Apply (Staging)
         working-directory: ./infra
-        run: terraform apply -auto-approve tfplan
+        run: |
+          echo "🚀 Applying infrastructure changes for staging..."
+          terraform apply -auto-approve tfplan
+          echo "✅ Infrastructure deployment complete"
       
       - name: Get Terraform Outputs
         id: tf-outputs
@@ -142,12 +148,32 @@ jobs:
           APP_NAME=$(terraform output -raw application_name)
           ENV_NAME=$(terraform output -raw environment_name)
           S3_BUCKET=$(terraform output -raw app_versions_bucket)
+          
           echo "app-name=${APP_NAME}" >> $GITHUB_OUTPUT
           echo "env-name=${ENV_NAME}" >> $GITHUB_OUTPUT
           echo "s3-bucket=${S3_BUCKET}" >> $GITHUB_OUTPUT
-          echo "🏗️  Application: ${APP_NAME}"
-          echo "🌍 Environment: ${ENV_NAME}"
-          echo "🪣  S3 Bucket: ${S3_BUCKET}"
+          
+          echo "## 🏗️ Infrastructure Outputs" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Application:** ${APP_NAME}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** ${ENV_NAME}" >> $GITHUB_STEP_SUMMARY
+          echo "- **S3 Bucket:** ${S3_BUCKET}" >> $GITHUB_STEP_SUMMARY
+
+  deploy-application-staging:
+    name: Deploy Application (Staging)
+    runs-on: ubuntu-latest
+    needs: [build-and-package, deploy-infrastructure-staging]
+    environment:
+      name: staging
+      url: ${{ steps.get-url.outputs.environment-url }}
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
       
       - name: Download deployment package
         uses: actions/download-artifact@v4
@@ -159,7 +185,7 @@ jobs:
         run: |
           ARTIFACT_KEY="${{ needs.build-and-package.outputs.artifact-key }}"
           VERSION_LABEL="${{ needs.build-and-package.outputs.version-label }}"
-          S3_BUCKET="${{ steps.tf-outputs.outputs.s3-bucket }}"
+          S3_BUCKET="${{ needs.deploy-infrastructure-staging.outputs.s3-bucket }}"
           S3_KEY="applications/bp-calculator/${ARTIFACT_KEY}"
           
           echo "📦 Uploading ${ARTIFACT_KEY} to s3://${S3_BUCKET}/${S3_KEY}"
@@ -173,12 +199,14 @@ jobs:
         run: |
           VERSION_LABEL="${{ needs.build-and-package.outputs.version-label }}"
           S3_KEY="${{ steps.s3-upload.outputs.s3-key }}"
+          APP_NAME="${{ needs.deploy-infrastructure-staging.outputs.application-name }}"
+          S3_BUCKET="${{ needs.deploy-infrastructure-staging.outputs.s3-bucket }}"
           
           echo "📦 Creating EB application version: ${VERSION_LABEL}"
           aws elasticbeanstalk create-application-version \
-            --application-name ${{ steps.tf-outputs.outputs.app-name }} \
+            --application-name "${APP_NAME}" \
             --version-label "${VERSION_LABEL}" \
-            --source-bundle S3Bucket="${{ steps.tf-outputs.outputs.s3-bucket }}",S3Key="${S3_KEY}" \
+            --source-bundle S3Bucket="${S3_BUCKET}",S3Key="${S3_KEY}" \
             --description "Build ${{ github.run_number }} - Commit ${GITHUB_SHA:0:7}" \
             --region ${{ env.AWS_REGION }}
           
@@ -189,11 +217,13 @@ jobs:
         id: deploy
         run: |
           VERSION_LABEL="${{ steps.create-version.outputs.version-label }}"
+          APP_NAME="${{ needs.deploy-infrastructure-staging.outputs.application-name }}"
+          ENV_NAME="${{ needs.deploy-infrastructure-staging.outputs.environment-name }}"
           
           echo "🚀 Deploying ${VERSION_LABEL} to staging..."
           aws elasticbeanstalk update-environment \
-            --application-name ${{ steps.tf-outputs.outputs.app-name }} \
-            --environment-name ${{ steps.tf-outputs.outputs.env-name }} \
+            --application-name "${APP_NAME}" \
+            --environment-name "${ENV_NAME}" \
             --version-label "${VERSION_LABEL}" \
             --region ${{ env.AWS_REGION }}
           
@@ -201,10 +231,13 @@ jobs:
       
       - name: Wait for deployment
         run: |
+          APP_NAME="${{ needs.deploy-infrastructure-staging.outputs.application-name }}"
+          ENV_NAME="${{ needs.deploy-infrastructure-staging.outputs.environment-name }}"
+          
           echo "⏳ Waiting for staging environment to be ready..."
           aws elasticbeanstalk wait environment-updated \
-            --application-name ${{ steps.tf-outputs.outputs.app-name }} \
-            --environment-name ${{ steps.tf-outputs.outputs.env-name }} \
+            --application-name "${APP_NAME}" \
+            --environment-name "${ENV_NAME}" \
             --region ${{ env.AWS_REGION }}
           
           echo "✅ Staging deployment completed"
@@ -212,9 +245,12 @@ jobs:
       - name: Get environment URL
         id: get-url
         run: |
+          APP_NAME="${{ needs.deploy-infrastructure-staging.outputs.application-name }}"
+          ENV_NAME="${{ needs.deploy-infrastructure-staging.outputs.environment-name }}"
+          
           ENV_URL=$(aws elasticbeanstalk describe-environments \
-            --application-name ${{ steps.tf-outputs.outputs.app-name }} \
-            --environment-names ${{ steps.tf-outputs.outputs.env-name }} \
+            --application-name "${APP_NAME}" \
+            --environment-names "${ENV_NAME}" \
             --query "Environments[0].CNAME" \
             --output text \
             --region ${{ env.AWS_REGION }})
@@ -257,7 +293,7 @@ jobs:
   test-staging:
     name: Test Staging Environment
     runs-on: ubuntu-latest
-    needs: deploy-staging
+    needs: [deploy-infrastructure-staging, deploy-application-staging]
     
     steps:
       - name: Checkout code
@@ -273,9 +309,12 @@ jobs:
       - name: Get staging URL
         id: get-url
         run: |
+          APP_NAME="${{ needs.deploy-infrastructure-staging.outputs.application-name }}"
+          ENV_NAME="${{ needs.deploy-infrastructure-staging.outputs.environment-name }}"
+          
           ENV_URL=$(aws elasticbeanstalk describe-environments \
-            --application-name bp-calculator \
-            --environment-names bp-calculator-staging \
+            --application-name "${APP_NAME}" \
+            --environment-names "${ENV_NAME}" \
             --query "Environments[0].CNAME" \
             --output text \
             --region ${{ env.AWS_REGION }})
@@ -343,14 +382,17 @@ jobs:
           echo "✅ Performance check passed" >> $GITHUB_STEP_SUMMARY
           echo "✅ Environment is ready for production promotion" >> $GITHUB_STEP_SUMMARY
 
-  deploy-production:
-    name: Deploy to Production
+  deploy-infrastructure-production:
+    name: Deploy Infrastructure (Production)
     runs-on: ubuntu-latest
     needs: [build-and-package, test-staging]
     if: github.ref == 'refs/heads/main'
     environment:
       name: production
-      url: ${{ steps.get-url.outputs.environment-url }}
+    outputs:
+      application-name: ${{ steps.tf-outputs.outputs.app-name }}
+      environment-name: ${{ steps.tf-outputs.outputs.env-name }}
+      s3-bucket: ${{ steps.tf-outputs.outputs.s3-bucket }}
     
     steps:
       - name: Checkout code
@@ -372,6 +414,7 @@ jobs:
       - name: Terraform Init (Production)
         working-directory: ./infra
         run: |
+          echo "🔧 Initializing Terraform for production environment..."
           terraform init \
             -backend-config="bucket=bp-terraform-state-431774613177" \
             -backend-config="key=production/terraform.tfstate" \
@@ -381,6 +424,7 @@ jobs:
       - name: Terraform Plan (Production)
         working-directory: ./infra
         run: |
+          echo "📋 Planning infrastructure changes for production..."
           terraform plan \
             -var="environment=production" \
             -var="aws_region=${{ env.AWS_REGION }}" \
@@ -390,7 +434,10 @@ jobs:
       
       - name: Terraform Apply (Production)
         working-directory: ./infra
-        run: terraform apply -auto-approve tfplan
+        run: |
+          echo "🚀 Applying infrastructure changes for production..."
+          terraform apply -auto-approve tfplan
+          echo "✅ Infrastructure deployment complete"
       
       - name: Get Terraform Outputs
         id: tf-outputs
@@ -399,12 +446,32 @@ jobs:
           APP_NAME=$(terraform output -raw application_name)
           ENV_NAME=$(terraform output -raw environment_name)
           S3_BUCKET=$(terraform output -raw app_versions_bucket)
+          
           echo "app-name=${APP_NAME}" >> $GITHUB_OUTPUT
           echo "env-name=${ENV_NAME}" >> $GITHUB_OUTPUT
           echo "s3-bucket=${S3_BUCKET}" >> $GITHUB_OUTPUT
-          echo "🏗️  Application: ${APP_NAME}"
-          echo "🌍 Environment: ${ENV_NAME}"
-          echo "🪣  S3 Bucket: ${S3_BUCKET}"
+          
+          echo "## 🏗️ Infrastructure Outputs (Production)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Application:** ${APP_NAME}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** ${ENV_NAME}" >> $GITHUB_STEP_SUMMARY
+          echo "- **S3 Bucket:** ${S3_BUCKET}" >> $GITHUB_STEP_SUMMARY
+
+  deploy-application-production:
+    name: Deploy Application (Production)
+    runs-on: ubuntu-latest
+    needs: [build-and-package, deploy-infrastructure-production]
+    environment:
+      name: production
+      url: ${{ steps.get-url.outputs.environment-url }}
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
       
       - name: Download deployment package
         uses: actions/download-artifact@v4
@@ -416,10 +483,10 @@ jobs:
         run: |
           ARTIFACT_KEY="${{ needs.build-and-package.outputs.artifact-key }}"
           VERSION_LABEL="${{ needs.build-and-package.outputs.version-label }}"
-          S3_BUCKET="${{ steps.tf-outputs.outputs.s3-bucket }}"
+          S3_BUCKET="${{ needs.deploy-infrastructure-production.outputs.s3-bucket }}"
           S3_KEY="applications/bp-calculator/${ARTIFACT_KEY}"
           
-          # Check if already uploaded (from staging deployment)
+          # Check if already uploaded (from staging deployment - different S3 bucket per environment)
           if aws s3 ls "s3://${S3_BUCKET}/${S3_KEY}" > /dev/null 2>&1; then
             echo "ℹ️  Artifact already exists in S3"
           else
@@ -435,19 +502,21 @@ jobs:
         run: |
           VERSION_LABEL="${{ needs.build-and-package.outputs.version-label }}"
           S3_KEY="${{ steps.s3-upload.outputs.s3-key }}"
+          APP_NAME="${{ needs.deploy-infrastructure-production.outputs.application-name }}"
+          S3_BUCKET="${{ needs.deploy-infrastructure-production.outputs.s3-bucket }}"
           
           # Check if version already exists (created during staging deployment)
           if aws elasticbeanstalk describe-application-versions \
-            --application-name ${{ steps.tf-outputs.outputs.app-name }} \
+            --application-name "${APP_NAME}" \
             --version-labels "${VERSION_LABEL}" \
             --region ${{ env.AWS_REGION }} | grep -q "${VERSION_LABEL}"; then
             echo "ℹ️  Version ${VERSION_LABEL} already exists"
           else
             echo "📦 Creating EB application version: ${VERSION_LABEL}"
             aws elasticbeanstalk create-application-version \
-              --application-name ${{ steps.tf-outputs.outputs.app-name }} \
+              --application-name "${APP_NAME}" \
               --version-label "${VERSION_LABEL}" \
-              --source-bundle S3Bucket="${{ steps.tf-outputs.outputs.s3-bucket }}",S3Key="${S3_KEY}" \
+              --source-bundle S3Bucket="${S3_BUCKET}",S3Key="${S3_KEY}" \
               --description "Production Build ${{ github.run_number }} - Commit ${GITHUB_SHA:0:7}" \
               --region ${{ env.AWS_REGION }}
             echo "✅ Created version: ${VERSION_LABEL}"
@@ -459,11 +528,13 @@ jobs:
       - name: Deploy to Production
         run: |
           VERSION_LABEL="${{ steps.create-version.outputs.version-label }}"
+          APP_NAME="${{ needs.deploy-infrastructure-production.outputs.application-name }}"
+          ENV_NAME="${{ needs.deploy-infrastructure-production.outputs.environment-name }}"
           
           echo "🚀 Deploying ${VERSION_LABEL} to production..."
           aws elasticbeanstalk update-environment \
-            --application-name ${{ steps.tf-outputs.outputs.app-name }} \
-            --environment-name ${{ steps.tf-outputs.outputs.env-name }} \
+            --application-name "${APP_NAME}" \
+            --environment-name "${ENV_NAME}" \
             --version-label "${VERSION_LABEL}" \
             --region ${{ env.AWS_REGION }}
           
@@ -471,10 +542,13 @@ jobs:
       
       - name: Wait for deployment
         run: |
+          APP_NAME="${{ needs.deploy-infrastructure-production.outputs.application-name }}"
+          ENV_NAME="${{ needs.deploy-infrastructure-production.outputs.environment-name }}"
+          
           echo "⏳ Waiting for production environment to be ready..."
           aws elasticbeanstalk wait environment-updated \
-            --application-name ${{ steps.tf-outputs.outputs.app-name }} \
-            --environment-name ${{ steps.tf-outputs.outputs.env-name }} \
+            --application-name "${APP_NAME}" \
+            --environment-name "${ENV_NAME}" \
             --region ${{ env.AWS_REGION }}
           
           echo "✅ Production deployment completed"
@@ -482,9 +556,12 @@ jobs:
       - name: Get environment URL
         id: get-url
         run: |
+          APP_NAME="${{ needs.deploy-infrastructure-production.outputs.application-name }}"
+          ENV_NAME="${{ needs.deploy-infrastructure-production.outputs.environment-name }}"
+          
           ENV_URL=$(aws elasticbeanstalk describe-environments \
-            --application-name ${{ steps.tf-outputs.outputs.app-name }} \
-            --environment-names ${{ steps.tf-outputs.outputs.env-name }} \
+            --application-name "${APP_NAME}" \
+            --environment-names "${ENV_NAME}" \
             --query "Environments[0].CNAME" \
             --output text \
             --region ${{ env.AWS_REGION }})
@@ -532,7 +609,7 @@ jobs:
   pipeline-complete:
     name: Pipeline Complete
     runs-on: ubuntu-latest
-    needs: [build-and-package, deploy-staging, test-staging, deploy-production]
+    needs: [build-and-package, deploy-infrastructure-staging, deploy-application-staging, test-staging, deploy-infrastructure-production, deploy-application-production]
     if: always()
     
     steps:
@@ -545,9 +622,11 @@ jobs:
           echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Build & Package | ${{ needs.build-and-package.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Deploy Staging | ${{ needs.deploy-staging.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Infrastructure (Staging) | ${{ needs.deploy-infrastructure-staging.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Application (Staging) | ${{ needs.deploy-application-staging.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Test Staging | ${{ needs.test-staging.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Deploy Production | ${{ needs.deploy-production.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Infrastructure (Production) | ${{ needs.deploy-infrastructure-production.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy Application (Production) | ${{ needs.deploy-application-production.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** ${{ needs.build-and-package.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
