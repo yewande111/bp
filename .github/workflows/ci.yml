@@ -30,10 +30,23 @@ jobs:
       - name: Run unit tests
         run: dotnet test --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" --results-directory ./TestResults
       
+      - name: Debug - List test results
+        if: always()
+        run: |
+          echo "Contents of TestResults directory:"
+          find ./TestResults -type f || echo "TestResults directory not found or empty"
+      
       - name: Generate coverage report
+        if: always()
+        continue-on-error: true
         run: |
           dotnet tool install --global dotnet-reportgenerator-globaltool
-          reportgenerator -reports:./TestResults/**/coverage.cobertura.xml -targetdir:./CoverageReport -reporttypes:Html
+          if [ -n "$(find ./TestResults -name 'coverage.cobertura.xml' 2>/dev/null)" ]; then
+            reportgenerator -reports:./TestResults/**/coverage.cobertura.xml -targetdir:./CoverageReport -reporttypes:Html
+            echo "✅ Coverage report generated"
+          else
+            echo "⚠️ No coverage files found, skipping report generation"
+          fi
       
       - name: Upload test results
         if: always()
@@ -41,6 +54,7 @@ jobs:
         with:
           name: test-results
           path: ./TestResults
+          if-no-files-found: warn
       
       - name: Upload coverage report
         if: always()
@@ -48,6 +62,7 @@ jobs:
         with:
           name: coverage-report
           path: ./CoverageReport
+          if-no-files-found: warn
       
       - name: Check test results
         run: |
