@@ -3,6 +3,29 @@
 ###############################################################################
 # BP Calculator - Destroy Script
 # Usage: ./destroy.sh [staging|production|all] [--auto-approve]
+#
+# Description:
+#   Safely destroys BP Calculator AWS infrastructure using Terraform.
+#   Creates state backups before destruction for disaster recovery.
+#   Optionally cleans up S3 artifact buckets and Terraform backend.
+#
+# Prerequisites:
+#   - Terraform installed (v1.0+)
+#   - AWS CLI installed and configured
+#   - AWS credentials with appropriate permissions
+#   - Active infrastructure deployed via Terraform
+#
+# Safety Features:
+#   - Requires typed confirmation for each environment
+#   - Backs up Terraform state before destruction
+#   - Provides detailed list of resources to be destroyed
+#
+# Cost Savings:
+#   - Staging destruction: Saves ~$7.56/month
+#   - Production destruction: Saves ~$7.56/month  
+#   - Full cleanup: Saves ~$15.16/month
+#
+# Last Updated: December 2025
 ###############################################################################
 
 set -e  # Exit on any error
@@ -285,4 +308,15 @@ print_header "Destruction Complete"
 print_success "All destruction tasks completed"
 echo ""
 print_info "State backups saved in: $SCRIPT_DIR/backup-*-state-*.json"
+echo ""
+print_info "Cost savings:"
+if [ "$ENV" = "staging" ]; then
+    echo "  Monthly savings: ~$7.56 (staging environment)"
+elif [ "$ENV" = "production" ]; then
+    echo "  Monthly savings: ~$7.56 (production environment)"
+elif [ "$ENV" = "all" ]; then
+    echo "  Monthly savings: ~$15.16 (both environments)"
+fi
+echo ""
+print_info "To re-deploy later, run: ./deploy.sh ${ENV}"
 echo ""

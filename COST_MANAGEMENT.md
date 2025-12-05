@@ -146,26 +146,7 @@ aws dynamodb delete-table --table-name bp-terraform-locks --region eu-west-1
 
 ---
 
-## 📅 Recommended Cleanup Timeline
-
-### During Development (Dec 4-9, 2025)
-- ✅ Keep production running for testing
-- ✅ Destroy staging after each test session
-- ✅ Monitor costs daily
-
-### After Project Submission (Dec 10+, 2025)
-- ⏰ **December 11:** Destroy staging environment
-- ⏰ **December 12:** Destroy production environment
-- ⏰ **December 13:** Delete all artifact buckets
-- ⏰ **December 14:** (Optional) Delete Terraform backend
-
-### Cost During Project Timeline (Dec 4-10)
-- **7 days × $15.16/day = ~$3.52 total**
-- If staging destroyed nightly: **7 days × $8.02/day = ~$1.87 total**
-
----
-
-## 🚨 Cost Alerts Setup
+##  Cost Alerts Setup
 
 ### Set Up AWS Budget Alert (Recommended)
 ```bash

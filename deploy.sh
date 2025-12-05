@@ -3,6 +3,22 @@
 ###############################################################################
 # BP Calculator - Deployment Script
 # Usage: ./deploy.sh [staging|production|all]
+# 
+# Description:
+#   Deploys BP Calculator infrastructure using Terraform to AWS Elastic Beanstalk.
+#   Supports separate staging and production environments with independent state files.
+#
+# Prerequisites:
+#   - Terraform installed (v1.0+)
+#   - AWS CLI installed and configured
+#   - AWS credentials with appropriate permissions
+#   - S3 backend bucket for Terraform state (bp-terraform-state-<account-id>)
+#
+# Environments:
+#   - staging: Single t3.micro instance for testing
+#   - production: Auto-scaled t3.micro instances (min 1, max 3)
+#
+# Last Updated: December 2025
 ###############################################################################
 
 set -e  # Exit on any error
@@ -170,8 +186,20 @@ esac
 print_header "Deployment Complete"
 print_success "All deployments completed successfully!"
 echo ""
+print_info "Environment URLs:"
+if [ "$ENV" = "staging" ] || [ "$ENV" = "all" ]; then
+    echo "  Staging: http://bp-calculator-staging.eu-west-1.elasticbeanstalk.com"
+fi
+if [ "$ENV" = "production" ] || [ "$ENV" = "all" ]; then
+    echo "  Production: http://bp-calculator-production.eu-west-1.elasticbeanstalk.com"
+fi
+echo ""
 print_info "Next steps:"
-echo "  1. Verify application is running"
-echo "  2. Check CloudWatch logs for any issues"
-echo "  3. Run smoke tests"
+echo "  1. Verify application is running (wait 2-3 minutes for EB initialization)"
+echo "  2. Test all blood pressure categories (Normal, Elevated, Stage 1, Stage 2)"
+echo "  3. Check CloudWatch logs at: https://console.aws.amazon.com/cloudwatch/"
+echo "  4. Monitor environment health in AWS Console"
+echo ""
+print_info "Deployment artifacts saved in S3:"
+echo "  s3://bp-calculator-eb-artifacts-${ENV}/"
 echo ""
