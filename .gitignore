@@ -259,3 +259,23 @@ paket-files/
 # Python Tools for Visual Studio (PTVS)
 __pycache__/
 *.pyc
+
+# Project Planning & Evidence Collection Files (Local Only)
+# These files are for development reference and should not be pushed to repo
+EXECUTION_PLAN.md
+EXECUTION_REVIEW.md
+ASSIGNMENT.md
+APPLICATION_TESTING_GUIDE.md
+EVIDENCE_CHECKLIST.md
+EVIDENCE_STATUS.md
+GITHUB_EVIDENCE_GUIDE.md
+SCREENSHOT_CHECKLIST.md
+SCREENSHOT_GUIDE.md
+PHASE8_REPORT_GUIDE.md
+evidence/
+collect-evidence.sh
+collect-aws-evidence.sh
+*.gif
+*.png
+*.jpg
+*.jpeg

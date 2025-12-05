@@ -1,6 +1,9 @@
 # Terraform Infrastructure for BP Calculator
 
-This directory contains Terraform configuration for deploying the Blood Pressure Calculator application to AWS Elastic Beanstalk with separate staging and production environments.
+> **Production-Grade Infrastructure as Code**  
+> Successfully deployed and managing 20+ AWS resources across staging and production environments
+
+This directory contains the complete Terraform configuration for the Blood Pressure Calculator application, implementing enterprise-level Infrastructure as Code practices with separate state management for staging and production environments.
 
 ## Directory Structure
 
@@ -213,10 +216,36 @@ terraform show | head -5
 - No sensitive data in variable files
 - Backend credentials stored in AWS CLI config
 
-## Next Steps
+## Deployment Status
 
-After infrastructure is deployed:
-1. Application will be deployed via CI/CD pipeline
-2. Blue-green deployment via CNAME swap
+### ✅ Infrastructure Successfully Deployed
+
+**Staging Environment:**
+- URL: http://bp-calculator-staging.eba-ypfhpc8m.eu-west-1.elasticbeanstalk.com
+- Status: Green/Healthy
+- Instances: 1 (t3.micro)
+- Version: v20251205-123344-cbd8639
+
+**Production Environment:**
+- URL: http://bp-calculator-production.eba-ixwz4c73.eu-west-1.elasticbeanstalk.com
+- Status: Green/Healthy
+- Instances: 2 (t3.micro, auto-scaled)
+- Version: v20251205-123344-cbd8639
+
+**State Management:**
+- Backend: S3 (bp-terraform-state-431774613177)
+- Staging State: staging/terraform.tfstate (~74KB)
+- Production State: production/terraform.tfstate (~74KB)
+- Locking: DynamoDB (bp-terraform-locks)
+
+## Integration with CI/CD
+
+This infrastructure is fully integrated with GitHub Actions:
+- **CI Pipeline:** Validates Terraform configuration
+- **CD Pipeline:** Automatically deploys infrastructure and application
+- **Blue-Green Deployment:** Zero-downtime updates
+- **Automated Testing:** Smoke tests after each deployment
+
+See [../.github/workflows/](../.github/workflows/) for pipeline details.
 3. Monitoring via CloudWatch
 4. Logs streamed to CloudWatch Logs
